@@ -32,6 +32,14 @@ from elevenlabs_mcp.utils import (
 )
 from elevenlabs_mcp.convai import create_conversation_config, create_platform_settings
 from elevenlabs.types.knowledge_base_locator import KnowledgeBaseLocator
+from elevenlabs.types.conversation_initiation_client_data_request_input import (
+    ConversationInitiationClientDataRequestInput,
+)
+from elevenlabs.types.conversation_config_client_override_input import (
+    ConversationConfigClientOverrideInput,
+)
+from elevenlabs.types.agent_config_override import AgentConfigOverride
+from elevenlabs.types.prompt_agent_api_model_override import PromptAgentApiModelOverride
 
 from elevenlabs import play
 from elevenlabs_mcp import __version__
@@ -475,6 +483,211 @@ def create_agent(
 
 
 @mcp.tool(
+    description="""Update an existing conversational AI agent's configuration.
+    
+    ⚠️ COST WARNING: This tool makes an API call to ElevenLabs which may incur costs. Only use when explicitly requested by the user.
+    
+    Args:
+        agent_id: ID of the agent to update
+        name: New name for the agent (optional)
+        system_prompt: New system prompt (optional)
+        first_message: New first message (optional)
+        voice_id: New voice ID (optional)
+        language: New language code (optional)
+        llm: New LLM model (optional)
+        temperature: New temperature setting (optional)
+        max_tokens: New max tokens limit (optional)
+        asr_quality: New ASR quality setting (optional)
+        model_id: New ElevenLabs model ID (optional)
+        optimize_streaming_latency: New streaming latency setting (optional)
+        stability: New voice stability setting (optional)
+        similarity_boost: New voice similarity boost setting (optional)
+        turn_timeout: New turn timeout setting (optional)
+        max_duration_seconds: New max conversation duration (optional)
+        record_voice: New voice recording setting (optional)
+        retention_days: New data retention setting (optional)
+        tags: List of tags for the agent (optional)
+    """
+)
+def update_agent(
+    agent_id: str,
+    name: str | None = None,
+    system_prompt: str | None = None,
+    first_message: str | None = None,
+    voice_id: str | None = None,
+    language: str | None = None,
+    llm: str | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
+    asr_quality: str | None = None,
+    model_id: str | None = None,
+    optimize_streaming_latency: int | None = None,
+    stability: float | None = None,
+    similarity_boost: float | None = None,
+    turn_timeout: int | None = None,
+    max_duration_seconds: int | None = None,
+    record_voice: bool | None = None,
+    retention_days: int | None = None,
+    tags: list[str] | None = None,
+) -> TextContent:
+    # Validate agent exists
+    try:
+        existing_agent = client.conversational_ai.agents.get(agent_id=agent_id)
+    except Exception as e:
+        make_error(f"Agent with ID {agent_id} not found: {str(e)}")
+
+    # Validate at least one parameter is provided
+    update_params = [
+        name,
+        system_prompt,
+        first_message,
+        voice_id,
+        language,
+        llm,
+        temperature,
+        max_tokens,
+        asr_quality,
+        model_id,
+        optimize_streaming_latency,
+        stability,
+        similarity_boost,
+        turn_timeout,
+        max_duration_seconds,
+        record_voice,
+        retention_days,
+        tags,
+    ]
+    if all(param is None for param in update_params):
+        make_error("At least one parameter must be provided to update the agent")
+
+    # Build conversation_config if any conversation-related params are provided
+    conversation_params = [
+        system_prompt,
+        first_message,
+        voice_id,
+        language,
+        llm,
+        temperature,
+        max_tokens,
+        asr_quality,
+        model_id,
+        optimize_streaming_latency,
+        stability,
+        similarity_boost,
+        turn_timeout,
+        max_duration_seconds,
+    ]
+
+    conversation_config = None
+    if any(param is not None for param in conversation_params):
+        # Get current config as base
+        current_config = existing_agent.conversation_config
+
+        # Create new config with updates
+        conversation_config = create_conversation_config(
+            language=language or current_config.agent.language,
+            system_prompt=system_prompt or current_config.agent.prompt.prompt,
+            llm=llm or current_config.agent.prompt.llm,
+            first_message=first_message
+            or getattr(current_config.agent, "first_message", None),
+            temperature=temperature
+            if temperature is not None
+            else current_config.agent.prompt.temperature,
+            max_tokens=max_tokens
+            if max_tokens is not None
+            else getattr(current_config.agent.prompt, "max_tokens", None),
+            asr_quality=asr_quality or current_config.asr.quality,
+            voice_id=voice_id or getattr(current_config.tts, "voice_id", None),
+            model_id=model_id or current_config.tts.model_id,
+            optimize_streaming_latency=optimize_streaming_latency
+            if optimize_streaming_latency is not None
+            else current_config.tts.optimize_streaming_latency,
+            stability=stability
+            if stability is not None
+            else current_config.tts.stability,
+            similarity_boost=similarity_boost
+            if similarity_boost is not None
+            else current_config.tts.similarity_boost,
+            turn_timeout=turn_timeout
+            if turn_timeout is not None
+            else current_config.turn.turn_timeout,
+            max_duration_seconds=max_duration_seconds
+            if max_duration_seconds is not None
+            else current_config.conversation.max_duration_seconds,
+        )
+
+    # Build platform_settings if any platform-related params are provided
+    platform_params = [record_voice, retention_days]
+    platform_settings = None
+    if any(param is not None for param in platform_params):
+        current_platform = existing_agent.platform_settings
+        platform_settings = create_platform_settings(
+            record_voice=record_voice
+            if record_voice is not None
+            else current_platform.privacy.record_voice,
+            retention_days=retention_days
+            if retention_days is not None
+            else current_platform.privacy.retention_days,
+        )
+
+    # Call the update API
+    try:
+        response = client.conversational_ai.agents.update(
+            agent_id=agent_id,
+            name=name,
+            conversation_config=conversation_config,
+            platform_settings=platform_settings,
+            tags=tags,
+        )
+    except Exception as e:
+        make_error(f"Failed to update agent: {str(e)}")
+
+    # Build list of updated fields
+    updated_fields = []
+    if name is not None:
+        updated_fields.append("name")
+    if system_prompt is not None:
+        updated_fields.append("system_prompt")
+    if first_message is not None:
+        updated_fields.append("first_message")
+    if voice_id is not None:
+        updated_fields.append("voice_id")
+    if language is not None:
+        updated_fields.append("language")
+    if llm is not None:
+        updated_fields.append("llm")
+    if temperature is not None:
+        updated_fields.append("temperature")
+    if max_tokens is not None:
+        updated_fields.append("max_tokens")
+    if asr_quality is not None:
+        updated_fields.append("asr_quality")
+    if model_id is not None:
+        updated_fields.append("model_id")
+    if optimize_streaming_latency is not None:
+        updated_fields.append("optimize_streaming_latency")
+    if stability is not None:
+        updated_fields.append("stability")
+    if similarity_boost is not None:
+        updated_fields.append("similarity_boost")
+    if turn_timeout is not None:
+        updated_fields.append("turn_timeout")
+    if max_duration_seconds is not None:
+        updated_fields.append("max_duration_seconds")
+    if record_voice is not None:
+        updated_fields.append("record_voice")
+    if retention_days is not None:
+        updated_fields.append("retention_days")
+    if tags is not None:
+        updated_fields.append("tags")
+
+    return TextContent(
+        type="text",
+        text=f"Agent updated successfully: Agent ID: {agent_id}, Name: {response.name}, Updated fields: {', '.join(updated_fields)}",
+    )
+
+
+@mcp.tool(
     description="""Add a knowledge base to ElevenLabs workspace. Allowed types are epub, pdf, docx, txt, html.
 
     ⚠️ COST WARNING: This tool makes an API call to ElevenLabs which may incur costs. Only use when explicitly requested by the user.
@@ -840,6 +1053,7 @@ def _get_phone_number_by_id(phone_number_id: str):
         agent_id: The ID of the agent that will handle the call
         agent_phone_number_id: The ID of the phone number to use for the call
         to_number: The phone number to call (E.164 format: +1xxxxxxxxxx)
+        append_to_system_prompt: Additional context to append to the agent's system prompt for this call only (optional)
 
     Returns:
         TextContent containing information about the call
@@ -849,15 +1063,42 @@ def make_outbound_call(
     agent_id: str,
     agent_phone_number_id: str,
     to_number: str,
+    append_to_system_prompt: str | None = None,
 ) -> TextContent:
     # Get phone number details to determine provider type
     phone_number = _get_phone_number_by_id(agent_phone_number_id)
-    
+
+    # Build conversation override if append_to_system_prompt is provided
+    conversation_initiation_client_data = None
+    if append_to_system_prompt:
+        # Get the agent's current configuration
+        try:
+            agent = client.conversational_ai.agents.get(agent_id=agent_id)
+            current_prompt = agent.conversation_config.agent.prompt.prompt
+
+            # Create the combined prompt
+            combined_prompt = f"{current_prompt}\n\n{append_to_system_prompt}"
+
+            # Build the override structure
+            prompt_override = PromptAgentApiModelOverride(prompt=combined_prompt)
+            agent_override = AgentConfigOverride(prompt=prompt_override)
+            conversation_config_override = ConversationConfigClientOverrideInput(
+                agent=agent_override
+            )
+            conversation_initiation_client_data = (
+                ConversationInitiationClientDataRequestInput(
+                    conversation_config_override=conversation_config_override
+                )
+            )
+        except Exception as e:
+            make_error(f"Failed to get agent configuration: {str(e)}")
+
     if phone_number.provider.lower() == "twilio":
         response = client.conversational_ai.twilio.outbound_call(
             agent_id=agent_id,
             agent_phone_number_id=agent_phone_number_id,
             to_number=to_number,
+            conversation_initiation_client_data=conversation_initiation_client_data,
         )
         provider_info = "Twilio"
     elif phone_number.provider.lower() == "sip_trunk":
@@ -865,12 +1106,18 @@ def make_outbound_call(
             agent_id=agent_id,
             agent_phone_number_id=agent_phone_number_id,
             to_number=to_number,
+            conversation_initiation_client_data=conversation_initiation_client_data,
         )
         provider_info = "SIP trunk"
     else:
         make_error(f"Unsupported provider type: {phone_number.provider}")
 
-    return TextContent(type="text", text=f"Outbound call initiated via {provider_info}: {response}.")
+    result_text = f"Outbound call initiated via {provider_info}"
+    if append_to_system_prompt:
+        result_text += " with appended system prompt context"
+    result_text += f": {response}."
+
+    return TextContent(type="text", text=result_text)
 
 
 @mcp.tool(
