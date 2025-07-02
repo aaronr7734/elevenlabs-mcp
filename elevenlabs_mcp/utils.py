@@ -211,15 +211,3 @@ def parse_conversation_transcript(transcript_entries, max_length: int = 50000):
         )
 
     return transcript, False
-
-
-def get_provided_parameters(**kwargs) -> list[str]:
-    """Return list of parameter names that are not None.
-
-    Args:
-        **kwargs: Named parameters to check
-
-    Returns:
-        list[str]: List of parameter names where value is not None
-    """
-    return [name for name, value in kwargs.items() if value is not None]
